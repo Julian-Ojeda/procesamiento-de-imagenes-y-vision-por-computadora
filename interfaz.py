@@ -1,0 +1,493 @@
+import tkinter as tk
+from tkinter import ttk, filedialog
+import numpy as np
+import matplotlib.pyplot as plt
+from PIL import Image, ImageTk
+
+import procesamiento as p
+import operadores as op
+import ruidos as r
+import filtros as f
+import detectores as d
+
+
+# ---------------- VARIABLES ----------------
+
+imagen_original = None
+imagen_actual = None
+
+
+# ---------------- FUNCIONES ----------------
+
+def cargar_imagen():
+
+    global imagen_original, imagen_actual
+
+    ruta = filedialog.askopenfilename(
+        filetypes=[("Imagenes","*.jpg *.png *.bmp *.raw")]
+    )
+
+    if not ruta:
+        return
+
+    R,G,B = p.cargar_imagen(ruta)
+
+    imagen_original = p.engrisar(R,G,B)
+    imagen_actual = imagen_original.copy()
+
+    mostrar_imagen(imagen_original,label_original)
+    mostrar_imagen(imagen_actual,label_resultado)
+
+
+def mostrar_imagen(imagen,label):
+
+    imagen = np.clip(imagen,0,255).astype(np.uint8)
+
+    pil = Image.fromarray(imagen)
+    pil = pil.resize((360,360))
+
+    tk_img = ImageTk.PhotoImage(pil)
+
+    label.config(image=tk_img)
+    label.image = tk_img
+
+
+def actualizar_progreso(valor):
+    progress_var.set(valor)
+    ventana.update_idletasks()
+
+
+def reiniciar_progreso():
+    progress_var.set(0)
+    ventana.update_idletasks()
+
+
+def aplicar_operador():
+    umbral = int(entry_umbral.get())
+    global imagen_actual
+
+    if imagen_actual is None:
+        return
+
+    operacion = combo_operadores.get()
+
+    if operacion == "Negativo":
+        imagen_actual = op.negativo(imagen_actual)
+
+    elif operacion == "Ecualizacion":
+        imagen_actual = op.ecualizacion_histograma(imagen_actual)
+
+    elif operacion == "Histograma":
+
+        hist = op.histograma(imagen_actual)
+
+        plt.figure()
+        plt.plot(hist)
+        plt.show()
+
+        return
+    elif operacion == "Umbralizacion":
+
+        imagen_actual = op.umbralizacion(
+            imagen_actual,
+            umbral
+    )
+
+    mostrar_imagen(imagen_actual,label_resultado)
+
+
+
+def aplicar_filtro():
+
+    global imagen_actual
+
+    if imagen_actual is None:
+        return
+    tam = int(combo_k.get())
+    sigma = float(entry_sigma.get())
+    lamda = float(entry_lambda.get())
+    umbral = int(entry_umbral.get())
+    ruido = combo_ruidos.get()  
+    
+    
+    
+
+    filtro = combo_filtros.get()
+
+    actualizar_progreso(0)
+    try:
+        if filtro == "Gauss":
+            imagen_actual = f.aplicar_filtro_gauss(
+                imagen_actual,
+                sigma,
+                progress_callback=actualizar_progreso
+            )
+
+        elif filtro == "Media":
+            imagen_actual = f.aplicar_filtro_media(
+                imagen_actual,
+                tam,
+                progress_callback=actualizar_progreso
+            )
+
+        elif filtro == "Mediana":
+            imagen_actual = f.filtro_mediana(
+                imagen_actual,
+                tam,
+                progress_callback=actualizar_progreso
+            )
+
+        elif filtro == "Mediana ponderada":
+            imagen_actual = f.aplicar_filtro_mediana_ponderada(
+                imagen_actual,
+                tam,
+                progress_callback=actualizar_progreso
+            )
+
+        elif filtro == "Realce de bordes":
+
+            umbral = int(entry_umbral.get())
+
+            imagen_actual = f.aplicar_realce_bordes(
+                imagen_actual,
+                tam,
+                umbral,
+                progress_callback=actualizar_progreso
+            )
+
+        elif filtro == "Definición":
+            imagen_actual = f.aplicar_filtro_definicion(
+                imagen_actual,
+                tam,
+                progress_callback=actualizar_progreso
+            )
+
+        elif filtro == "Sobel":
+
+            imagen_actual = f.aplicar_sobel(
+                imagen_actual,
+                umbral,
+                progress_callback=actualizar_progreso
+            )
+
+
+        elif filtro == "Prewitt":
+
+            imagen_actual = f.aplicar_prewitt(
+                imagen_actual,
+                umbral,
+                progress_callback=actualizar_progreso
+            ) 
+
+        mostrar_imagen(imagen_actual,label_resultado)
+    finally:
+        reiniciar_progreso()
+
+
+def aplicar_detector_borde():
+    global imagen_actual
+
+    if imagen_actual is None:
+        return
+
+    umbral = int(entry_umbral.get())
+    detector = combo_detectores.get()
+
+    actualizar_progreso(0)
+    try:
+        if detector == 'Sobel':
+            imagen_actual = f.aplicar_sobel(imagen_actual, umbral, progress_callback=actualizar_progreso)
+        elif detector == 'Prewitt':
+            imagen_actual = f.aplicar_prewitt(imagen_actual, umbral, progress_callback=actualizar_progreso)
+        elif detector == 'Canny':
+            imagen_actual = d.canny(imagen_actual, progress_callback=actualizar_progreso)
+
+        mostrar_imagen(imagen_actual, label_resultado)
+    finally:
+        reiniciar_progreso()
+
+
+def aplicar_ruido():
+        
+
+    global imagen_actual
+
+    if imagen_actual is None:
+        return
+
+    tam = int(combo_k.get())
+    sigma = float(entry_sigma.get())
+    lamda = float(entry_lambda.get())
+    umbral = int(entry_umbral.get())
+    ruido = combo_ruidos.get()
+
+    if ruido == "Sal y Pimienta":
+        imagen_actual = r.ruido_sal_pimienta(
+            imagen_actual,
+            densidad = float(entry_densidad.get())
+        )
+
+    elif ruido == "Gaussiano":
+        imagen_actual = r.agregar_ruido_gaussiano(
+            imagen_actual,
+            sigma
+        )
+
+    elif ruido == "Potencia":
+        imagen_actual = r.transformacion_potencia(
+            imagen_actual,
+            lamda
+        )
+
+    mostrar_imagen(imagen_actual,label_resultado)
+    reiniciar_progreso()
+
+
+def restaurar():
+
+    global imagen_actual
+
+    if imagen_original is None:
+        return
+
+    imagen_actual = imagen_original.copy()
+
+    mostrar_imagen(imagen_actual,label_resultado)
+
+
+# ---------------- VENTANA ----------------
+
+ventana = tk.Tk()
+ventana.title("Procesamiento de Imagenes")
+ventana.configure(bg="#f4f4f4")
+ventana.state('zoomed')
+
+style = ttk.Style(ventana)
+style.theme_use('clam')
+style.configure('TFrame', background='#f4f4f4')
+style.configure('TLabel', background='#f4f4f4', font=('Helvetica', 10))
+style.configure('Header.TLabel', font=('Helvetica', 16, 'bold'))
+style.configure('Section.TLabel', font=('Helvetica', 11, 'bold'))
+style.configure('Card.TLabelframe', background='#f4f4f4', borderwidth=0)
+style.configure('Card.TLabelframe.Label', background='#f4f4f4', font=('Helvetica', 11, 'bold'))
+style.configure('Accent.TButton', foreground='#ffffff', background='#4a4a4a', padding=8)
+style.map('Accent.TButton', background=[('active', '#333333')])
+style.configure('TButton', padding=8)
+style.configure('TCombobox', padding=4)
+
+header_frame = ttk.Frame(ventana, padding=(20, 15))
+header_frame.grid(row=0, column=0, sticky='ew')
+ventana.columnconfigure(0, weight=1)
+
+titulo = ttk.Label(header_frame, text='Procesamiento de Imágenes', style='Header.TLabel')
+titulo.grid(row=0, column=0, sticky='w')
+
+boton_frame = ttk.Frame(header_frame)
+boton_frame.grid(row=0, column=1, sticky='e')
+
+boton_cargar = ttk.Button(
+    boton_frame,
+    text='Cargar imagen',
+    command=cargar_imagen,
+    style='Accent.TButton'
+)
+boton_cargar.grid(row=0, column=0, padx=8)
+
+boton_restaurar = ttk.Button(
+    boton_frame,
+    text='Restaurar original',
+    command=restaurar
+)
+boton_restaurar.grid(row=0, column=1)
+
+main_frame = ttk.Frame(ventana, padding=20)
+main_frame.grid(row=1, column=0, sticky='nsew')
+ventana.rowconfigure(1, weight=1)
+main_frame.columnconfigure(0, weight=1)
+main_frame.columnconfigure(1, weight=0)
+
+frame_imagenes = ttk.Frame(main_frame)
+frame_imagenes.grid(row=0, column=0, sticky='nsew', padx=(0, 20), pady=(0, 10))
+frame_imagenes.columnconfigure(0, weight=1)
+frame_imagenes.columnconfigure(1, weight=1)
+
+original_card = ttk.Labelframe(frame_imagenes, text='Original', style='Card.TLabelframe', padding=10)
+original_card.grid(row=0, column=0, padx=8, pady=8, sticky='nsew')
+result_card = ttk.Labelframe(frame_imagenes, text='Resultado', style='Card.TLabelframe', padding=10)
+result_card.grid(row=0, column=1, padx=8, pady=8, sticky='nsew')
+
+label_original = ttk.Label(original_card, text='Sin imagen', anchor='center')
+label_original.pack(expand=True, fill='both', ipadx=10, ipady=110)
+label_resultado = ttk.Label(result_card, text='Sin imagen', anchor='center')
+label_resultado.pack(expand=True, fill='both', ipadx=10, ipady=110)
+
+frame_controles = ttk.Labelframe(main_frame, text='Controles', style='Card.TLabelframe', padding=18)
+frame_controles.grid(row=0, column=1, sticky='nsew')
+frame_controles.columnconfigure(0, weight=1)
+frame_controles.columnconfigure(1, weight=1)
+frame_controles.columnconfigure(2, weight=1)
+frame_controles.columnconfigure(3, weight=1)
+frame_controles.columnconfigure(4, weight=1)
+
+# OPERADORES
+
+operadores_label = ttk.Label(frame_controles, text='Operadores', style='Section.TLabel')
+operadores_label.grid(row=0, column=0, sticky='w', pady=(0, 6))
+
+combo_operadores = ttk.Combobox(
+    frame_controles,
+    values=[
+        'Negativo',
+        'Ecualizacion',
+        'Histograma',
+        'Umbralizacion'
+    ],
+    state='readonly'
+)
+combo_operadores.grid(row=1, column=0, padx=8, pady=(0, 10), sticky='ew')
+combo_operadores.current(0)
+
+tt_button_operadores = ttk.Button(
+    frame_controles,
+    text='Aplicar',
+    command=aplicar_operador
+)
+tt_button_operadores.grid(row=2, column=0, pady=4, sticky='ew')
+
+# FILTROS
+
+filtros_label = ttk.Label(frame_controles, text='Filtros', style='Section.TLabel')
+filtros_label.grid(row=0, column=1, sticky='w', pady=(0, 6))
+
+combo_filtros = ttk.Combobox(
+    frame_controles,
+    values=[
+        'Gauss',
+        'Media',
+        'Mediana',
+        'Mediana ponderada',
+        'Realce de bordes',
+        'Definición',
+        'Sobel',
+        'Prewitt'
+    ],
+    state='readonly'
+)
+combo_filtros.grid(row=1, column=1, padx=8, pady=(0, 10), sticky='ew')
+combo_filtros.current(0)
+
+boton_filtros = ttk.Button(
+    frame_controles,
+    text='Aplicar',
+    command=aplicar_filtro
+)
+boton_filtros.grid(row=2, column=1, pady=4, sticky='ew')
+
+# RUIDOS
+
+ruidos_label = ttk.Label(frame_controles, text='Ruidos', style='Section.TLabel')
+ruidos_label.grid(row=0, column=2, sticky='w', pady=(0, 6))
+
+combo_ruidos = ttk.Combobox(
+    frame_controles,
+    values=[
+        'Sal y Pimienta',
+        'Gaussiano',
+        'Potencia'
+    ],
+    state='readonly'
+)
+combo_ruidos.grid(row=1, column=2, padx=8, pady=(0, 10), sticky='ew')
+combo_ruidos.current(0)
+
+boton_ruidos = ttk.Button(
+    frame_controles,
+    text='Aplicar',
+    command=aplicar_ruido
+)
+boton_ruidos.grid(row=2, column=2, pady=4, sticky='ew')
+
+# DETECTORES DE BORDE
+
+detector_label = ttk.Label(frame_controles, text='Detectores de borde', style='Section.TLabel')
+detector_label.grid(row=0, column=3, sticky='w', pady=(0, 6))
+
+combo_detectores = ttk.Combobox(
+    frame_controles,
+    values=[
+        'Sobel',
+        'Prewitt',
+        'Canny'
+    ],
+    state='readonly'
+)
+combo_detectores.grid(row=1, column=3, padx=8, pady=(0, 10), sticky='ew')
+combo_detectores.current(0)
+
+boton_detectores = ttk.Button(
+    frame_controles,
+    text='Aplicar',
+    command=aplicar_detector_borde
+)
+boton_detectores.grid(row=2, column=3, pady=4, sticky='ew')
+
+# PARAMETROS
+
+param_label = ttk.Label(frame_controles, text='Parámetros', style='Section.TLabel')
+param_label.grid(row=3, column=0, columnspan=5, sticky='w', pady=(16, 6))
+
+k_label = ttk.Label(frame_controles, text='K')
+k_label.grid(row=4, column=0, sticky='w', padx=8)
+combo_k = ttk.Combobox(
+    frame_controles,
+    values=[3, 5, 7, 9],
+    state='readonly'
+)
+combo_k.grid(row=5, column=0, padx=8, pady=4, sticky='ew')
+combo_k.current(0)
+
+sigma_label = ttk.Label(frame_controles, text='Sigma')
+sigma_label.grid(row=4, column=1, sticky='w', padx=8)
+entry_sigma = ttk.Entry(frame_controles)
+entry_sigma.grid(row=5, column=1, padx=8, pady=4, sticky='ew')
+entry_sigma.insert(0, '1')
+
+lambda_label = ttk.Label(frame_controles, text='Lambda')
+lambda_label.grid(row=4, column=2, sticky='w', padx=8)
+entry_lambda = ttk.Entry(frame_controles)
+entry_lambda.grid(row=5, column=2, padx=8, pady=4, sticky='ew')
+entry_lambda.insert(0, '1')
+
+densidad_label = ttk.Label(frame_controles, text='Densidad')
+densidad_label.grid(row=4, column=3, sticky='w', padx=8)
+entry_densidad = ttk.Entry(frame_controles)
+entry_densidad.grid(row=5, column=3, padx=8, pady=4, sticky='ew')
+entry_densidad.insert(0, '0.05')
+
+umbral_label = ttk.Label(frame_controles, text='Umbral')
+umbral_label.grid(row=4, column=4, sticky='w', padx=8)
+entry_umbral = ttk.Entry(frame_controles)
+entry_umbral.grid(row=5, column=4, padx=8, pady=4, sticky='ew')
+entry_umbral.insert(0, '128')
+
+# Barra de progreso
+progress_var = tk.IntVar(value=0)
+progress_frame = ttk.Frame(frame_controles)
+progress_frame.grid(row=6, column=0, columnspan=5, pady=(16, 0), sticky='ew')
+progress_frame.columnconfigure(0, weight=0)
+progress_frame.columnconfigure(1, weight=1)
+
+progress_label = ttk.Label(progress_frame, text='Progreso:')
+progress_label.grid(row=0, column=0, sticky='w')
+progress_bar = ttk.Progressbar(
+    progress_frame,
+    variable=progress_var,
+    maximum=100
+)
+progress_bar.grid(row=0, column=1, sticky='ew', padx=(8, 0))
+
+# Ajuste final de tamaño
+for i in range(7):
+    frame_controles.rowconfigure(i, weight=0)
+
+ventana.mainloop()

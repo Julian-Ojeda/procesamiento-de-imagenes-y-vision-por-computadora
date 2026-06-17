@@ -30,7 +30,7 @@ def _convolucion_raw(imagen, operador, progress_callback=None):
     return resultado
 
 
-def canny(imagen, umbral_bajo=50, umbral_alto=100, progress_callback=None):
+def canny(imagen, umbral_bajo=50, umbral_alto=130, progress_callback=None):
     """
     Detector de Canny simplificado.
     imagen: imagen en escala de grises uint8 (0-255)

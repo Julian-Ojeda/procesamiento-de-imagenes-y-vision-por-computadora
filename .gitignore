@@ -1,0 +1,20 @@
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Nested repository clone
+repo_nuevo/
+
+# IDE / editor directories
+.vscode/
+.idea/
+
+# Misc
+*.log
+*.sqlite3
+.DS_Store

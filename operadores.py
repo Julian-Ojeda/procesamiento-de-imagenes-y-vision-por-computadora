@@ -4,7 +4,7 @@ import procesamiento as p
 import ruidos as r
 import filtros as f
 import matplotlib.pyplot as plt
-
+import detectores as det
 
 def negativo(imagen)-> np.ndarray:
     return 255 - imagen

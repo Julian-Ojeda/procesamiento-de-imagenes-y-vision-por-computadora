@@ -3,6 +3,7 @@ from PIL import Image
 import procesamiento as p
 import operadores as op
 import ruidos as r
+import detectores as det
 
 def filtro_media(imagen, tam=3):
     return p.ventana_deslizante(imagen, np.ones((tam, tam)) / tam**2)
@@ -156,7 +157,7 @@ def prewitt():
 
 def aplicar_prewitt(imagen, umbral, progress_callback=None):
 
-    kernel_x, kernel_y = prewitt()
+    kernel_x, kernel_y = sobel()
 
     derivada_x = p.ventana_deslizante(
         imagen,

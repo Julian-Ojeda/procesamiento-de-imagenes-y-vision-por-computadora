@@ -15,6 +15,8 @@ import detectores as d
 
 imagen_original = None
 imagen_actual = None
+selected_point = None
+selection_mode = False
 
 
 # ---------------- FUNCIONES ----------------
@@ -39,12 +41,28 @@ def cargar_imagen():
     mostrar_imagen(imagen_actual,label_resultado)
 
 
-def mostrar_imagen(imagen,label):
+def mostrar_imagen(imagen, label, highlight_point=None):
 
-    imagen = np.clip(imagen,0,255).astype(np.uint8)
+    imagen = np.clip(imagen, 0, 255).astype(np.uint8)
 
-    pil = Image.fromarray(imagen)
-    pil = pil.resize((360,360))
+    if imagen.ndim == 2:
+        imagen_pintada = np.stack([imagen] * 3, axis=-1)
+    else:
+        imagen_pintada = imagen.copy()
+
+    if highlight_point is not None:
+        y, x = highlight_point
+        alto_img, ancho_img = imagen_pintada.shape[:2]
+        if 0 <= y < alto_img and 0 <= x < ancho_img:
+            for dy in range(-2, 3):
+                if 0 <= y + dy < alto_img:
+                    imagen_pintada[y + dy, x] = [255, 255, 255]
+            for dx in range(-2, 3):
+                if 0 <= x + dx < ancho_img:
+                    imagen_pintada[y, x + dx] = [255, 255, 255]
+
+    pil = Image.fromarray(imagen_pintada)
+    pil = pil.resize((360, 360))
 
     tk_img = ImageTk.PhotoImage(pil)
 
@@ -60,6 +78,78 @@ def actualizar_progreso(valor):
 def reiniciar_progreso():
     progress_var.set(0)
     ventana.update_idletasks()
+
+
+def seleccionar_punto(event):
+    global selected_point, selection_mode
+    if imagen_original is None or not selection_mode:
+        return
+
+    alto_img, ancho_img = imagen_original.shape
+    label_w = event.widget.winfo_width()
+    label_h = event.widget.winfo_height()
+    x_img = int(event.x * ancho_img / max(label_w, 1))
+    y_img = int(event.y * alto_img / max(label_h, 1))
+    x_img = max(0, min(x_img, ancho_img - 1))
+    y_img = max(0, min(y_img, alto_img - 1))
+
+    selected_point = (y_img, x_img)
+    selection_mode = False
+    label_punto_seleccionado.config(text=f'Seleccionado: ({x_img}, {y_img})')
+    label_original.config(cursor='')
+    mostrar_imagen(imagen_original, label_original, highlight_point=selected_point)
+
+
+def activar_seleccion(event=None):
+    global selection_mode
+    if imagen_original is None:
+        return
+
+    selection_mode = True
+    label_original.config(cursor='crosshair')
+    label_punto_seleccionado.config(text='Modo selección: haga clic en la imagen original')
+
+
+def superponer_phi(imagen: np.ndarray, phi: np.ndarray) -> np.ndarray:
+    imagen_rgb = np.stack([imagen] * 3, axis=-1).astype(np.uint8)
+    mascara_lout = phi == 1
+    mascara_lin = phi == -1
+    imagen_rgb[mascara_lout] = np.array([255, 255, 0], dtype=np.uint8)
+    imagen_rgb[mascara_lin] = np.array([255, 0, 0], dtype=np.uint8)
+    return imagen_rgb
+
+
+def aplicar_contorno_activo():
+    global imagen_actual
+    if imagen_original is None or selected_point is None:
+        return
+
+    rect_size = int(entry_tamanio_contorno.get())
+    Na = int(entry_iteraciones_contorno.get())
+    y_centro, x_centro = selected_point
+    mitad = max(1, rect_size // 2)
+
+    fila_inicio = max(0, y_centro - mitad)
+    columna_inicio = max(0, x_centro - mitad)
+    alto = min(rect_size, imagen_original.shape[0] - fila_inicio)
+    ancho = min(rect_size, imagen_original.shape[1] - columna_inicio)
+
+    rect_inicial = (fila_inicio, columna_inicio, alto, ancho)
+    mascara_objeto, phi = d.aplicar_contornos_activos(imagen_original, rect_inicial, Na=Na, progress_callback=actualizar_progreso)
+
+    imagen_actual = mascara_objeto
+    overlay = superponer_phi(imagen_original, phi)
+    mostrar_imagen(overlay, label_resultado)
+    mostrar_imagen(imagen_original, label_original, highlight_point=selected_point)
+
+
+def superponer_phi(imagen: np.ndarray, phi: np.ndarray) -> np.ndarray:
+    imagen_rgb = np.stack([imagen] * 3, axis=-1).astype(np.uint8)
+    mascara_lout = phi == 1
+    mascara_lin = phi == -1
+    imagen_rgb[mascara_lout] = np.array([255, 255, 0], dtype=np.uint8)
+    imagen_rgb[mascara_lin] = np.array([255, 0, 0], dtype=np.uint8)
+    return imagen_rgb
 
 
 def aplicar_operador():
@@ -200,7 +290,25 @@ def aplicar_detector_borde():
         elif detector == 'Prewitt':
             imagen_actual = f.aplicar_prewitt(imagen_actual, umbral, progress_callback=actualizar_progreso)
         elif detector == 'Canny':
-            imagen_actual = d.canny(imagen_actual, progress_callback=actualizar_progreso)
+            imagen_actual = d.aplicar_filtro_canny(imagen_actual, umbral_bajo=umbral//2, umbral_alto=umbral)
+        elif detector == 'SUSAN':
+            umbral_similitud = max(1, min(umbral, 40))
+            umbral_borde = min(8, max(1, umbral // 16))
+            imagen_actual = d.aplicar_susan(
+                imagen_actual,
+                umbral_similitud=umbral_similitud,
+                umbral_borde=umbral_borde,
+                progress_callback=actualizar_progreso
+            )
+        elif detector == 'Hough':
+            # Se asume que `imagen_actual` ya contiene la binaria de bordes (Canny)
+            bordes = imagen_actual.copy()
+            imagen_actual = d.aplicar_transformada_hough(
+                imagen_original,
+                imagen_bordes=bordes,
+                pasos_theta=180,
+                umbral_votos=umbral
+            )
 
         mostrar_imagen(imagen_actual, label_resultado)
     finally:
@@ -259,21 +367,25 @@ def restaurar():
 
 ventana = tk.Tk()
 ventana.title("Procesamiento de Imagenes")
-ventana.configure(bg="#f4f4f4")
+ventana.configure(bg="#1f2126")
 ventana.state('zoomed')
 
 style = ttk.Style(ventana)
 style.theme_use('clam')
-style.configure('TFrame', background='#f4f4f4')
-style.configure('TLabel', background='#f4f4f4', font=('Helvetica', 10))
-style.configure('Header.TLabel', font=('Helvetica', 16, 'bold'))
-style.configure('Section.TLabel', font=('Helvetica', 11, 'bold'))
-style.configure('Card.TLabelframe', background='#f4f4f4', borderwidth=0)
-style.configure('Card.TLabelframe.Label', background='#f4f4f4', font=('Helvetica', 11, 'bold'))
-style.configure('Accent.TButton', foreground='#ffffff', background='#4a4a4a', padding=8)
-style.map('Accent.TButton', background=[('active', '#333333')])
-style.configure('TButton', padding=8)
-style.configure('TCombobox', padding=4)
+style.configure('TFrame', background='#1f2126')
+style.configure('TLabel', background='#1f2126', foreground='#e6e6e6', font=('Helvetica', 10))
+style.configure('Header.TLabel', background='#1f2126', foreground='#ff6b6b', font=('Helvetica', 16, 'bold'))
+style.configure('Section.TLabel', background='#1f2126', foreground='#ff8a8a', font=('Helvetica', 11, 'bold'))
+style.configure('Card.TLabelframe', background='#282b31', borderwidth=1, relief='solid')
+style.configure('Card.TLabelframe.Label', background='#282b31', foreground='#ff6b6b', font=('Helvetica', 11, 'bold'))
+style.configure('Accent.TButton', foreground='#ffffff', background='#a82a2a', padding=8)
+style.map('Accent.TButton', background=[('active', '#cc2f2f')])
+style.configure('Secondary.TButton', foreground='#ffb3b3', background='#2d3036', borderwidth=1, relief='solid', padding=8)
+style.map('Secondary.TButton', background=[('active', '#3c4148')])
+style.configure('TButton', foreground='#f0f0f0', background='#353940', padding=8)
+style.configure('TCombobox', foreground='#f0f0f0', fieldbackground='#2d3036', background='#2d3036', padding=4)
+style.configure('TLabelframe', background='#282b31')
+style.configure('TLabelframe.Label', background='#282b31', foreground='#ff6b6b')
 
 header_frame = ttk.Frame(ventana, padding=(20, 15))
 header_frame.grid(row=0, column=0, sticky='ew')
@@ -296,7 +408,8 @@ boton_cargar.grid(row=0, column=0, padx=8)
 boton_restaurar = ttk.Button(
     boton_frame,
     text='Restaurar original',
-    command=restaurar
+    command=restaurar,
+    style='Secondary.TButton'
 )
 boton_restaurar.grid(row=0, column=1)
 
@@ -316,9 +429,10 @@ original_card.grid(row=0, column=0, padx=8, pady=8, sticky='nsew')
 result_card = ttk.Labelframe(frame_imagenes, text='Resultado', style='Card.TLabelframe', padding=10)
 result_card.grid(row=0, column=1, padx=8, pady=8, sticky='nsew')
 
-label_original = ttk.Label(original_card, text='Sin imagen', anchor='center')
+label_original = ttk.Label(original_card, text='Sin imagen', anchor='center', background='#282b31', foreground='#d8d8d8')
 label_original.pack(expand=True, fill='both', ipadx=10, ipady=110)
-label_resultado = ttk.Label(result_card, text='Sin imagen', anchor='center')
+label_original.bind('<Button-1>', seleccionar_punto)
+label_resultado = ttk.Label(result_card, text='Sin imagen', anchor='center', background='#282b31', foreground='#d8d8d8')
 label_resultado.pack(expand=True, fill='both', ipadx=10, ipady=110)
 
 frame_controles = ttk.Labelframe(main_frame, text='Controles', style='Card.TLabelframe', padding=18)
@@ -417,7 +531,9 @@ combo_detectores = ttk.Combobox(
     values=[
         'Sobel',
         'Prewitt',
-        'Canny'
+        'Canny',
+        'SUSAN',
+        'Hough'
     ],
     state='readonly'
 )
@@ -431,43 +547,86 @@ boton_detectores = ttk.Button(
 )
 boton_detectores.grid(row=2, column=3, pady=4, sticky='ew')
 
+# CONTORNO ACTIVO
+
+contorno_frame = ttk.Labelframe(frame_controles, text='Contorno Activo', style='Card.TLabelframe', padding=10)
+contorno_frame.grid(row=3, column=0, columnspan=5, sticky='ew', pady=(16, 0))
+contorno_frame.columnconfigure(0, weight=1)
+contorno_frame.columnconfigure(1, weight=1)
+
+boton_seleccionar = ttk.Button(
+    contorno_frame,
+    text='Seleccionar punto',
+    command=activar_seleccion,
+    style='Secondary.TButton'
+)
+boton_seleccionar.grid(row=0, column=0, padx=8, pady=(0, 4), sticky='ew')
+
+label_punto_seleccionado = ttk.Label(
+    contorno_frame,
+    text='Seleccionado: ninguno',
+    background='#282b31',
+    foreground='#f0f0f0'
+)
+label_punto_seleccionado.grid(row=0, column=1, padx=8, pady=(0, 4), sticky='ew')
+
+rect_label = ttk.Label(contorno_frame, text='Tamaño rect.', style='TLabel')
+rect_label.grid(row=1, column=0, sticky='w', padx=8)
+entry_tamanio_contorno = ttk.Entry(contorno_frame)
+entry_tamanio_contorno.grid(row=2, column=0, padx=8, pady=4, sticky='ew')
+entry_tamanio_contorno.insert(0, '20')
+
+iter_label = ttk.Label(contorno_frame, text='Iteraciones', style='TLabel')
+iter_label.grid(row=1, column=1, sticky='w', padx=8)
+entry_iteraciones_contorno = ttk.Entry(contorno_frame)
+entry_iteraciones_contorno.grid(row=2, column=1, padx=8, pady=4, sticky='ew')
+entry_iteraciones_contorno.insert(0, '50')
+
+boton_contorno = ttk.Button(
+    contorno_frame,
+    text='Aplicar contorno',
+    command=aplicar_contorno_activo,
+    style='Accent.TButton'
+)
+boton_contorno.grid(row=3, column=0, columnspan=2, pady=4, sticky='ew')
+
 # PARAMETROS
 
 param_label = ttk.Label(frame_controles, text='Parámetros', style='Section.TLabel')
-param_label.grid(row=3, column=0, columnspan=5, sticky='w', pady=(16, 6))
+param_label.grid(row=8, column=0, columnspan=5, sticky='w', pady=(16, 6))
 
 k_label = ttk.Label(frame_controles, text='K')
-k_label.grid(row=4, column=0, sticky='w', padx=8)
+k_label.grid(row=9, column=0, sticky='w', padx=8)
 combo_k = ttk.Combobox(
     frame_controles,
     values=[3, 5, 7, 9],
     state='readonly'
 )
-combo_k.grid(row=5, column=0, padx=8, pady=4, sticky='ew')
+combo_k.grid(row=10, column=0, padx=8, pady=4, sticky='ew')
 combo_k.current(0)
 
 sigma_label = ttk.Label(frame_controles, text='Sigma')
-sigma_label.grid(row=4, column=1, sticky='w', padx=8)
+sigma_label.grid(row=9, column=1, sticky='w', padx=8)
 entry_sigma = ttk.Entry(frame_controles)
-entry_sigma.grid(row=5, column=1, padx=8, pady=4, sticky='ew')
+entry_sigma.grid(row=10, column=1, padx=8, pady=4, sticky='ew')
 entry_sigma.insert(0, '1')
 
 lambda_label = ttk.Label(frame_controles, text='Lambda')
-lambda_label.grid(row=4, column=2, sticky='w', padx=8)
+lambda_label.grid(row=9, column=2, sticky='w', padx=8)
 entry_lambda = ttk.Entry(frame_controles)
-entry_lambda.grid(row=5, column=2, padx=8, pady=4, sticky='ew')
+entry_lambda.grid(row=10, column=2, padx=8, pady=4, sticky='ew')
 entry_lambda.insert(0, '1')
 
 densidad_label = ttk.Label(frame_controles, text='Densidad')
-densidad_label.grid(row=4, column=3, sticky='w', padx=8)
+densidad_label.grid(row=9, column=3, sticky='w', padx=8)
 entry_densidad = ttk.Entry(frame_controles)
-entry_densidad.grid(row=5, column=3, padx=8, pady=4, sticky='ew')
+entry_densidad.grid(row=10, column=3, padx=8, pady=4, sticky='ew')
 entry_densidad.insert(0, '0.05')
 
 umbral_label = ttk.Label(frame_controles, text='Umbral')
-umbral_label.grid(row=4, column=4, sticky='w', padx=8)
+umbral_label.grid(row=9, column=4, sticky='w', padx=8)
 entry_umbral = ttk.Entry(frame_controles)
-entry_umbral.grid(row=5, column=4, padx=8, pady=4, sticky='ew')
+entry_umbral.grid(row=10, column=4, padx=8, pady=4, sticky='ew')
 entry_umbral.insert(0, '128')
 
 # Barra de progreso

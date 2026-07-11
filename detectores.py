@@ -400,9 +400,14 @@ def aplicar_contornos_activos(
     Fd = calcular_funcion_decision(imagen_gris, theta_0, theta_1)
 
     for iteracion in range(1, Na + 1):
-        if all(Fd[fila, columna] < 0 for fila, columna in L_out):
-            break
-        if all(Fd[fila, columna] > 0 for fila, columna in L_in):
+        # Paramos solo si NINGUNO de los dos frentes tiene más margen para moverse
+        # (expansión Y contracción estancadas a la vez). Con "or" en vez de "and"
+        # el algoritmo cortaba en la primera vuelta: los píxeles de L_in son los
+        # que definieron theta_1, así que "Fd > 0 en todo L_in" es casi siempre
+        # cierto desde el inicio y frenaba la expansión antes de que ocurriera.
+        expansion_estancada = all(Fd[fila, columna] < 0 for fila, columna in L_out)
+        contraccion_estancada = all(Fd[fila, columna] > 0 for fila, columna in L_in)
+        if expansion_estancada and contraccion_estancada:
             break
 
         _expandir_L_out(imagen_gris, phi, L_out, L_in, Fd)

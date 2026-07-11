@@ -9,6 +9,7 @@ import operadores as op
 import ruidos as r
 import filtros as f
 import detectores as d
+import sift as sf
 
 
 # ---------------- VARIABLES ----------------
@@ -150,6 +151,71 @@ def superponer_phi(imagen: np.ndarray, phi: np.ndarray) -> np.ndarray:
     imagen_rgb[mascara_lout] = np.array([255, 255, 0], dtype=np.uint8)
     imagen_rgb[mascara_lin] = np.array([255, 0, 0], dtype=np.uint8)
     return imagen_rgb
+
+
+def aplicar_sift_keypoints():
+    if imagen_original is None:
+        return
+
+    try:
+        umbral_contraste = float(entry_sift_contraste.get())
+    except ValueError:
+        umbral_contraste = 5.0
+
+    actualizar_progreso(0)
+    try:
+        keypoints_sift = sf.detectar_keypoints_sift(
+            imagen_original,
+            umbral_contraste=umbral_contraste,
+            progress_callback=actualizar_progreso
+        )
+        label_sift_info.config(text=f'Keypoints: {len(keypoints_sift)}')
+        overlay = sf.dibujar_keypoints(imagen_original, keypoints_sift)
+        mostrar_imagen(overlay, label_resultado)
+    finally:
+        reiniciar_progreso()
+
+
+def aplicar_sift_correspondencias():
+    if imagen_original is None:
+        return
+
+    ruta = filedialog.askopenfilename(
+        title='Elegir segunda imagen para comparar',
+        filetypes=[("Imagenes", "*.jpg *.png *.bmp *.raw")]
+    )
+    if not ruta:
+        return
+
+    R, G, B = p.cargar_imagen(ruta)
+    imagen_b = p.engrisar(R, G, B)
+
+    try:
+        umbral_contraste = float(entry_sift_contraste.get())
+    except ValueError:
+        umbral_contraste = 5.0
+    try:
+        umbral_distancia = float(entry_sift_distancia.get())
+    except ValueError:
+        umbral_distancia = 0.7
+
+    actualizar_progreso(0)
+    try:
+        keypoints_a = sf.detectar_keypoints_sift(
+            imagen_original, umbral_contraste=umbral_contraste, progress_callback=actualizar_progreso
+        )
+        keypoints_b = sf.detectar_keypoints_sift(imagen_b, umbral_contraste=umbral_contraste)
+        correspondencias = sf.emparejar_descriptores(keypoints_a, keypoints_b, umbral_distancia=umbral_distancia)
+        label_sift_info.config(text=f'Correspondencias: {len(correspondencias)}')
+
+        viz = sf.dibujar_correspondencias(imagen_original, keypoints_a, imagen_b, keypoints_b, correspondencias)
+        plt.figure()
+        plt.imshow(viz)
+        plt.axis('off')
+        plt.title(f'{len(correspondencias)} correspondencias SIFT')
+        plt.show()
+    finally:
+        reiniciar_progreso()
 
 
 def aplicar_operador():
@@ -580,7 +646,7 @@ iter_label = ttk.Label(contorno_frame, text='Iteraciones', style='TLabel')
 iter_label.grid(row=1, column=1, sticky='w', padx=8)
 entry_iteraciones_contorno = ttk.Entry(contorno_frame)
 entry_iteraciones_contorno.grid(row=2, column=1, padx=8, pady=4, sticky='ew')
-entry_iteraciones_contorno.insert(0, '50')
+entry_iteraciones_contorno.insert(0, '150')
 
 boton_contorno = ttk.Button(
     contorno_frame,
@@ -589,6 +655,51 @@ boton_contorno = ttk.Button(
     style='Accent.TButton'
 )
 boton_contorno.grid(row=3, column=0, columnspan=2, pady=4, sticky='ew')
+
+# SIFT
+
+sift_frame = ttk.Labelframe(frame_controles, text='SIFT', style='Card.TLabelframe', padding=10)
+sift_frame.grid(row=4, column=0, columnspan=5, sticky='ew', pady=(16, 0))
+sift_frame.columnconfigure(0, weight=1)
+sift_frame.columnconfigure(1, weight=1)
+sift_frame.columnconfigure(2, weight=1)
+sift_frame.columnconfigure(3, weight=1)
+
+contraste_sift_label = ttk.Label(sift_frame, text='Umbral contraste', style='TLabel')
+contraste_sift_label.grid(row=0, column=0, sticky='w', padx=8)
+entry_sift_contraste = ttk.Entry(sift_frame)
+entry_sift_contraste.grid(row=1, column=0, padx=8, pady=(0, 4), sticky='ew')
+entry_sift_contraste.insert(0, '5')
+
+distancia_sift_label = ttk.Label(sift_frame, text='Distancia máx. match', style='TLabel')
+distancia_sift_label.grid(row=0, column=1, sticky='w', padx=8)
+entry_sift_distancia = ttk.Entry(sift_frame)
+entry_sift_distancia.grid(row=1, column=1, padx=8, pady=(0, 4), sticky='ew')
+entry_sift_distancia.insert(0, '0.7')
+
+label_sift_info = ttk.Label(
+    sift_frame,
+    text='Keypoints: -',
+    background='#282b31',
+    foreground='#f0f0f0'
+)
+label_sift_info.grid(row=0, column=2, columnspan=2, padx=8, pady=(0, 4), sticky='ew')
+
+boton_sift_keypoints = ttk.Button(
+    sift_frame,
+    text='Detectar keypoints',
+    command=aplicar_sift_keypoints,
+    style='Accent.TButton'
+)
+boton_sift_keypoints.grid(row=1, column=2, padx=8, pady=(0, 4), sticky='ew')
+
+boton_sift_comparar = ttk.Button(
+    sift_frame,
+    text='Comparar con otra imagen',
+    command=aplicar_sift_correspondencias,
+    style='Secondary.TButton'
+)
+boton_sift_comparar.grid(row=1, column=3, padx=8, pady=(0, 4), sticky='ew')
 
 # PARAMETROS
 
